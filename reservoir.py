@@ -55,7 +55,7 @@ class Cycle_Reservoir(torch.nn.Module):
         self.leaky = leaky
         self.sparsity = sparsity
 
-        self.kernel = torch.Tensor(init_weight(24*input_size, self.units, sparsity * self.input_scaling))
+        self.kernel = torch.Tensor(init_weight(input_size, self.units, sparsity * self.input_scaling))
         self.kernel = nn.Parameter(self.kernel, requires_grad=False)
 
         W = init_reservoir(self.units, cycle_weight, jump_weight, jump_size, connection_weight)
@@ -69,33 +69,22 @@ class Cycle_Reservoir(torch.nn.Module):
             self.recurrent_kernel = (W + I * (self.leaky - 1)) * (1 / self.leaky)
         self.recurrent_kernel = nn.Parameter(self.recurrent_kernel, requires_grad=False)
 
-        self.weight_out = nn.Linear(4072, self.output_size)
-        self.weight2 = nn.Linear(8400, self.output_size)
+        self.weight_out = nn.Linear(self.units + self.output_size, self.output_size)
         self.weight = nn.Linear(self.units * 2 + self.output_size * 4, self.output_size)
 
         self.bias = torch.Tensor((torch.rand(self.units + self.input_size) * 2 - 1) * self.input_scaling)
         self.bias = nn.Parameter(self.bias, requires_grad=False)
 
     def forward(self, xt, h_prev):
-        #print("RC xt.shape", xt.shape)
-        #print("RC h_prev.shape", xt.shape)
         x = xt.clone().detach()
-        #print("RC x.shape", x.shape)
-        #print("RC self.kernel.shape", self.kernel.shape)
         input_part = torch.mm(x, self.kernel)
-        #print("RC input_part .shape", input_part.shape)
         state_part = torch.tanh(torch.mm(h_prev, self.recurrent_kernel) + input_part)
-        #print("RC state_part .shape", state_part.shape)
+
         output = torch.cat([x, h_prev * (1 - self.leaky) + state_part], dim=1)
-        #print("1")
         reservoir_output = torch.tanh(self.weight_out(output))
-        #print("2")
         reservoir_output1 = torch.cat([x, state_part, reservoir_output,
                                       x ** 2, state_part ** 2,  reservoir_output ** 2], dim=1)
-        #print("3")
-        #print("RC reservoir_output1 .shape", reservoir_output1.shape)
-        reservoir_output2 = torch.tanh(self.weight2(reservoir_output1))
-        #print("4")
+        reservoir_output2 = torch.tanh(self.weight(reservoir_output1))
         return state_part, reservoir_output2
 
 
@@ -118,12 +107,11 @@ class ReservoirLayer(torch.nn.Module):
             self.h_prev = self.init_hidden(x.shape[0]).to(x.device)
 
         hs = []
-        #print("x.shape7",x.shape)
-        #for t in range(x.shape[1]):
 
-            #xt = x[:, t]
-        self.h_prev, output = self.cycle_reservoir_layer(x, self.h_prev)
-        hs.append(output)
+        for t in range(x.shape[1]):
+            xt = x[:, t]
+            self.h_prev, output = self.cycle_reservoir_layer(xt, self.h_prev)
+            hs.append(output)
 
         hs = torch.stack(hs, dim=1)
 
